@@ -1,0 +1,33 @@
+@media print {
+  body {
+    background: #fff !important;
+    color: #000 !important;
+  }
+  .sidebar,
+  .topbar,
+  .mobile-bottom-nav,
+  .no-print,
+  .page-toolbar,
+  .toast-container,
+  .modal-backdrop {
+    display: none !important;
+  }
+  .main-wrapper {
+    margin-left: 0 !important;
+    padding: 0 !important;
+  }
+  .page-content {
+    padding: 0 !important;
+    max-width: 100% !important;
+  }
+  .card,
+  .invoice-paper {
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
+  .invoice-paper.thermal {
+    width: 80mm !important;
+    margin: 0 !important;
+  }
+}

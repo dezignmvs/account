@@ -1,0 +1,226 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function businessDoc(businessId) {
+      return get(/databases/$(database)/documents/businesses/$(businessId));
+    }
+
+    function isBusinessOwner(businessId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/businesses/$(businessId))
+        && businessDoc(businessId).data.ownerId == request.auth.uid;
+    }
+
+    function isBusinessOwnerAfter(businessId) {
+      return isSignedIn()
+        && getAfter(/databases/$(database)/documents/businesses/$(businessId)).data.ownerId == request.auth.uid;
+    }
+
+    function memberPath(businessId) {
+      return /databases/$(database)/documents/businessMembers/$(businessId + '_' + request.auth.uid);
+    }
+
+    function isActiveMember(businessId) {
+      return isSignedIn()
+        && exists(memberPath(businessId))
+        && get(memberPath(businessId)).data.status == 'active';
+    }
+
+    function hasMemberOrOwnerAccess(businessId) {
+      return isBusinessOwner(businessId) || isActiveMember(businessId);
+    }
+
+    function hasPermission(businessId, perm) {
+      return isBusinessOwner(businessId)
+        || (isActiveMember(businessId) && get(memberPath(businessId)).data.permissions[perm] == true);
+    }
+
+    function validBusinessData(businessId) {
+      return request.resource.data.businessId == businessId;
+    }
+
+    // User Profiles
+    match /users/{uid} {
+      allow read: if isSignedIn();
+      allow create, update: if isUser(uid);
+      allow delete: if false;
+    }
+
+    // Businesses
+    match /businesses/{businessId} {
+      allow read: if isSignedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || isActiveMember(businessId)
+      );
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update: if hasPermission(businessId, 'changeSettings');
+      allow delete: if isBusinessOwner(businessId);
+    }
+
+    // Business Members (Doc ID: {businessId}_{uid} or {businessId}_{inviteId})
+    match /businessMembers/{memberId} {
+      allow read: if isSignedIn() && (
+        resource.data.uid == request.auth.uid
+        || resource.data.email == request.auth.token.email
+        || hasMemberOrOwnerAccess(resource.data.businessId)
+      );
+      allow create: if isSignedIn() && (
+        (request.resource.data.uid == request.auth.uid
+          && request.resource.data.role == 'Owner'
+          && isBusinessOwnerAfter(request.resource.data.businessId))
+        || isBusinessOwner(request.resource.data.businessId)
+        || hasPermission(request.resource.data.businessId, 'manageStaff')
+      );
+      allow update: if isSignedIn() && (
+        isBusinessOwner(resource.data.businessId)
+        || hasPermission(resource.data.businessId, 'manageStaff')
+        || (resource.data.email == request.auth.token.email && request.resource.data.uid == request.auth.uid)
+      );
+      allow delete: if isSignedIn() && (
+        isBusinessOwner(resource.data.businessId)
+        || hasPermission(resource.data.businessId, 'manageStaff')
+      );
+    }
+
+    // Counters (Invoice / Purchase / Payment sequence)
+    match /counters/{counterId} {
+      allow get: if isSignedIn() && (resource == null || hasMemberOrOwnerAccess(resource.data.businessId));
+      allow list: if isSignedIn() && hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create, update: if isSignedIn() && hasMemberOrOwnerAccess(request.resource.data.businessId);
+      allow delete: if false;
+    }
+
+    // Settings
+    match /settings/{businessId} {
+      allow read: if hasMemberOrOwnerAccess(businessId);
+      allow create: if isBusinessOwnerAfter(businessId) || hasPermission(businessId, 'changeSettings') || isBusinessOwner(businessId);
+      allow update: if hasPermission(businessId, 'changeSettings') || isBusinessOwner(businessId);
+      allow delete: if false;
+    }
+
+    // Parties (Customers & Suppliers)
+    match /parties/{partyId} {
+      allow read: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create: if hasPermission(request.resource.data.businessId, 'manageParties')
+        && validBusinessData(request.resource.data.businessId);
+      allow update: if hasPermission(resource.data.businessId, 'manageParties')
+        || hasPermission(resource.data.businessId, 'createInvoices')
+        || hasPermission(resource.data.businessId, 'managePurchases');
+      allow delete: if hasPermission(resource.data.businessId, 'deleteTransactions');
+    }
+
+    // Categories
+    match /categories/{categoryId} {
+      allow read: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create, update: if hasPermission(request.resource.data.businessId, 'manageProducts');
+      allow delete: if hasPermission(resource.data.businessId, 'manageProducts');
+    }
+
+    // Products
+    match /products/{productId} {
+      allow read: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create: if hasPermission(request.resource.data.businessId, 'manageProducts');
+      allow update: if hasPermission(resource.data.businessId, 'manageProducts')
+        || hasPermission(resource.data.businessId, 'createInvoices')
+        || hasPermission(resource.data.businessId, 'managePurchases');
+      allow delete: if hasPermission(resource.data.businessId, 'manageProducts');
+    }
+
+    // Stock Movements (Immutable audit trail)
+    match /stockMovements/{movementId} {
+      allow read: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create: if hasPermission(request.resource.data.businessId, 'manageProducts')
+        || hasPermission(request.resource.data.businessId, 'createInvoices')
+        || hasPermission(request.resource.data.businessId, 'managePurchases');
+      allow update, delete: if false;
+    }
+
+    // Sales & Sales Items
+    match /sales/{saleId} {
+      allow get: if isSignedIn() && (resource == null || hasPermission(resource.data.businessId, 'viewSales'));
+      allow list: if hasPermission(resource.data.businessId, 'viewSales');
+      allow create: if hasPermission(request.resource.data.businessId, 'createInvoices');
+      allow update: if hasPermission(resource.data.businessId, 'editInvoices')
+        || hasPermission(resource.data.businessId, 'deleteTransactions')
+        || hasPermission(resource.data.businessId, 'managePayments');
+      allow delete: if false;
+    }
+
+    match /salesItems/{itemId} {
+      allow read: if hasPermission(resource.data.businessId, 'viewSales');
+      allow create: if hasPermission(request.resource.data.businessId, 'createInvoices');
+      allow update: if hasPermission(resource.data.businessId, 'editInvoices');
+      allow delete: if hasPermission(resource.data.businessId, 'editInvoices');
+    }
+
+    // Purchases & Purchase Items
+    match /purchases/{purchaseId} {
+      allow get: if isSignedIn() && (resource == null || hasMemberOrOwnerAccess(resource.data.businessId));
+      allow list: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create: if hasPermission(request.resource.data.businessId, 'managePurchases')
+        || hasPermission(request.resource.data.businessId, 'createInvoices');
+      allow update: if hasPermission(resource.data.businessId, 'managePurchases')
+        || hasPermission(resource.data.businessId, 'deleteTransactions')
+        || hasPermission(resource.data.businessId, 'managePayments');
+      allow delete: if false;
+    }
+
+    match /purchaseItems/{itemId} {
+      allow read: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create: if hasPermission(request.resource.data.businessId, 'managePurchases')
+        || hasPermission(request.resource.data.businessId, 'createInvoices');
+      allow update, delete: if hasPermission(resource.data.businessId, 'managePurchases');
+    }
+
+    // Digital Ledger Entries (Immutable financial history)
+    match /ledgerEntries/{entryId} {
+      allow get: if isSignedIn() && (resource == null || hasMemberOrOwnerAccess(resource.data.businessId));
+      allow list: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create: if hasPermission(request.resource.data.businessId, 'manageParties')
+        || hasPermission(request.resource.data.businessId, 'createInvoices')
+        || hasPermission(request.resource.data.businessId, 'managePurchases')
+        || hasPermission(request.resource.data.businessId, 'managePayments');
+      allow update, delete: if false;
+    }
+
+    // Payments
+    match /payments/{paymentId} {
+      allow get: if isSignedIn() && (resource == null || hasMemberOrOwnerAccess(resource.data.businessId));
+      allow list: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create: if hasPermission(request.resource.data.businessId, 'managePayments')
+        || hasPermission(request.resource.data.businessId, 'createInvoices')
+        || hasPermission(request.resource.data.businessId, 'manageParties');
+      allow update, delete: if false;
+    }
+
+    // Expenses
+    match /expenses/{expenseId} {
+      allow read: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create, update: if hasPermission(request.resource.data.businessId, 'manageExpenses');
+      allow delete: if hasPermission(resource.data.businessId, 'deleteTransactions');
+    }
+
+    // Notifications
+    match /notifications/{notifId} {
+      allow read, update: if hasMemberOrOwnerAccess(resource.data.businessId);
+      allow create: if hasMemberOrOwnerAccess(request.resource.data.businessId);
+      allow delete: if hasMemberOrOwnerAccess(resource.data.businessId);
+    }
+
+    // Audit Logs (Immutable)
+    match /auditLogs/{logId} {
+      allow read: if hasPermission(resource.data.businessId, 'viewReports') || isBusinessOwner(resource.data.businessId);
+      allow create: if hasMemberOrOwnerAccess(request.resource.data.businessId);
+      allow update, delete: if false;
+    }
+  }
+}

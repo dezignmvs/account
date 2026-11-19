@@ -1,0 +1,40 @@
+{
+  "name": "KhataFlow — Business Billing, Inventory & Digital Ledger",
+  "short_name": "KhataFlow",
+  "description": "Complete business management platform combining GST billing, inventory, purchases, expenses, and Khatabook-style digital ledger.",
+  "start_url": "/index.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F7F8F6",
+  "theme_color": "#146C43",
+  "categories": ["business", "finance", "productivity"],
+  "icons": [
+    {
+      "src": "/assets/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Sale Invoice",
+      "short_name": "New Sale",
+      "url": "/index.html#/sales/create",
+      "icons": [{ "src": "/assets/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Khata Ledger",
+      "short_name": "Ledger",
+      "url": "/index.html#/ledger",
+      "icons": [{ "src": "/assets/icons/icon.svg", "sizes": "any" }]
+    },
+    {
+      "name": "Record Payment",
+      "short_name": "Payment",
+      "url": "/index.html#/payments",
+      "icons": [{ "src": "/assets/icons/icon.svg", "sizes": "any" }]
+    }
+  ]
+}
